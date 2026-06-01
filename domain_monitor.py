@@ -367,12 +367,12 @@ def combine_results(domain: str, unicode_domain: str, sources: list[SourceResult
     )
 
 
-def check_domain(domain: str, unicode_domain: str) -> DomainResult:
+def check_domain(domain: str, unicode_domain: str, force_refresh: bool = False) -> DomainResult:
     cache_key = domain
     now = time.time()
     with _cache_lock:
         cached = _cache.get(cache_key)
-        if cached and now - cached[0] < 3600:
+        if not force_refresh and cached and now - cached[0] < 3600:
             return result_from_dict(cached[1])
 
     sources = [check_rdap(domain), check_whois(domain)]
@@ -426,6 +426,9 @@ INDEX_HTML = r"""<!doctype html>
     textarea { width: 100%; min-height: 170px; border: 1px solid #c9d3e6; border-radius: 12px; padding: 14px; font: 15px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; box-sizing: border-box; }
     button { border: 0; border-radius: 10px; background: #3454d1; color: white; padding: 12px 18px; font-weight: 700; cursor: pointer; }
     button:disabled { opacity: .55; cursor: wait; }
+    button.secondary { background: #eef3ff; color: #263a8b; }
+    button.mini { padding: 7px 10px; font-size: 13px; }
+    label.autoretry { display: inline-flex; align-items: center; gap: 6px; color: #5f6b7a; font-size: 14px; }
     .panel { background: white; border-radius: 16px; box-shadow: 0 10px 30px rgba(23, 32, 51, .08); padding: 20px; margin-bottom: 20px; }
     .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
     .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
@@ -461,7 +464,9 @@ INDEX_HTML = r"""<!doctype html>
       <textarea id="domains" placeholder="example.com&#10;site.ru&#10;пример.рф"></textarea>
       <div class="controls">
         <button id="check">Проверить домены</button>
+        <button id="retryFailed" class="secondary" disabled>Обновить неудачные</button>
         <button id="csv" disabled>Скачать CSV</button>
+        <label class="autoretry"><input id="autoRetry" type="checkbox"> автообновлять неудачные каждые 5 минут</label>
         <span id="progress" class="muted">Ожидание списка доменов</span>
       </div>
       <div class="legend">
@@ -474,14 +479,15 @@ INDEX_HTML = r"""<!doctype html>
     <section id="summary" class="summary" hidden></section>
     <section class="panel" style="padding:0; overflow:auto; max-height:70vh;">
       <table>
-        <thead><tr><th>Домен</th><th>Дата окончания</th><th>Час окончания UTC</th><th>Оплачен до</th><th>Дней</th><th>Статус</th><th>Надёжность</th><th>Источники и заметки</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="8" class="muted">Результаты появятся здесь.</td></tr></tbody>
+        <thead><tr><th>Домен</th><th>Дата окончания</th><th>Час окончания UTC</th><th>Оплачен до</th><th>Дней</th><th>Статус</th><th>Надёжность</th><th>Источники и заметки</th><th>Действие</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="9" class="muted">Результаты появятся здесь.</td></tr></tbody>
       </table>
     </section>
   </main>
 <script>
 const $ = (id) => document.getElementById(id);
 let lastResults = [];
+let autoRetryTimer = null;
 function parseDomains(text) {
   return [...new Set(text.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean))];
 }
@@ -492,9 +498,41 @@ function fmtDate(value) {
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 }
+function unknownResults() {
+  return lastResults.filter(r => r.status === 'unknown');
+}
+function sortResults(results) {
+  return results.sort((a, b) => {
+    const ad = a.days_left ?? 999999;
+    const bd = b.days_left ?? 999999;
+    if (ad !== bd) return ad - bd;
+    return a.domain.localeCompare(b.domain);
+  });
+}
+async function checkDomains(domains, forceRefresh = false) {
+  const response = await fetch('/api/check', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({domains, force_refresh: forceRefresh})
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Ошибка проверки');
+  return data.results;
+}
+function mergeResults(newResults) {
+  const byDomain = new Map(lastResults.map(r => [r.domain, r]));
+  for (const result of newResults) byDomain.set(result.domain, result);
+  render(sortResults([...byDomain.values()]));
+}
+function updateControls() {
+  const hasResults = lastResults.length > 0;
+  const hasUnknown = unknownResults().length > 0;
+  $('csv').disabled = !hasResults;
+  $('retryFailed').disabled = !hasUnknown;
+}
 function render(results) {
   lastResults = results;
-  $('csv').disabled = !results.length;
+  updateControls();
   const counts = {safe:0, warning:0, danger:0, critical:0, unknown:0};
   for (const r of results) counts[r.status] = (counts[r.status] || 0) + 1;
   $('summary').hidden = false;
@@ -503,6 +541,7 @@ function render(results) {
   $('rows').innerHTML = results.map(r => {
     const sourceHtml = r.sources.map(s => `${escapeHtml(s.source)}: ${escapeHtml(s.expires_at || (s.available ? 'свободен' : s.error || 'нет даты'))}`).join('<br>');
     const notes = r.notes && r.notes.length ? `<div class="muted">${r.notes.map(escapeHtml).join('<br>')}</div>` : '';
+    const retryHint = r.status === 'unknown' ? '<div class="muted">Можно обновить позже: публичный WHOIS/RDAP часто отвечает после паузы.</div>' : '';
     return `<tr class="${r.status}">
       <td><strong>${escapeHtml(r.unicode_domain)}</strong><div class="muted">${escapeHtml(r.domain)}</div></td>
       <td class="nowrap">${escapeHtml(r.expires_date || '—')}</td>
@@ -511,25 +550,60 @@ function render(results) {
       <td class="nowrap">${r.days_left ?? '—'}</td>
       <td><span class="pill ${r.status}">${escapeHtml(r.status_label)}</span></td>
       <td>${escapeHtml(r.confidence)}</td>
-      <td><details><summary>показать</summary>${sourceHtml}${notes}</details></td>
+      <td><details><summary>показать</summary>${sourceHtml}${notes}${retryHint}</details></td>
+      <td><button class="mini secondary refresh-one" data-domain="${escapeHtml(r.domain)}">Обновить</button></td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" class="muted">Нет результатов.</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="muted">Нет результатов.</td></tr>';
 }
-$('check').addEventListener('click', async () => {
+async function runFullCheck() {
   const domains = parseDomains($('domains').value);
   if (!domains.length) { alert('Вставьте список доменов.'); return; }
   $('check').disabled = true;
+  $('retryFailed').disabled = true;
   $('progress').textContent = `Проверяем ${domains.length} доменов...`;
   try {
-    const response = await fetch('/api/check', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({domains})});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Ошибка проверки');
-    render(data.results);
-    $('progress').textContent = `Готово: ${data.results.length} доменов, ${new Date().toLocaleString()}`;
+    render(await checkDomains(domains));
+    $('progress').textContent = `Готово: ${lastResults.length} доменов, не удалось проверить: ${unknownResults().length}, ${new Date().toLocaleString()}`;
   } catch (error) {
     $('progress').textContent = `Ошибка: ${error.message}`;
   } finally {
     $('check').disabled = false;
+    updateControls();
+  }
+}
+async function refreshDomains(domains, label = 'Обновляем') {
+  if (!domains.length) return;
+  $('retryFailed').disabled = true;
+  $('progress').textContent = `${label}: ${domains.length}...`;
+  try {
+    mergeResults(await checkDomains(domains, true));
+    $('progress').textContent = `Обновлено: ${domains.length}, осталось неудачных: ${unknownResults().length}, ${new Date().toLocaleString()}`;
+  } catch (error) {
+    $('progress').textContent = `Ошибка обновления: ${error.message}`;
+  } finally {
+    updateControls();
+  }
+}
+$('check').addEventListener('click', runFullCheck);
+$('retryFailed').addEventListener('click', () => refreshDomains(unknownResults().map(r => r.domain), 'Обновляем неудачные'));
+$('rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('.refresh-one');
+  if (!button) return;
+  button.disabled = true;
+  await refreshDomains([button.dataset.domain], `Обновляем ${button.dataset.domain}`);
+  button.disabled = false;
+});
+$('autoRetry').addEventListener('change', () => {
+  if (autoRetryTimer) {
+    clearInterval(autoRetryTimer);
+    autoRetryTimer = null;
+  }
+  if ($('autoRetry').checked) {
+    autoRetryTimer = setInterval(() => {
+      const domains = unknownResults().map(r => r.domain);
+      if (domains.length) refreshDomains(domains, 'Автообновление неудачных');
+    }, 5 * 60 * 1000);
+    $('progress').textContent = 'Автообновление неудачных включено: каждые 5 минут.';
   }
 });
 $('csv').addEventListener('click', () => {
@@ -581,6 +655,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             raw_domains = payload.get("domains", [])
+            force_refresh = bool(payload.get("force_refresh", False))
             if not isinstance(raw_domains, list):
                 raise ValueError("domains должен быть списком")
             normalized: list[tuple[str, str]] = []
@@ -592,7 +667,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     seen.add(parsed[0])
             with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 future_domains = {
-                    executor.submit(check_domain, domain, unicode_domain): (domain, unicode_domain)
+                    executor.submit(check_domain, domain, unicode_domain, force_refresh): (domain, unicode_domain)
                     for domain, unicode_domain in normalized
                 }
                 results = []

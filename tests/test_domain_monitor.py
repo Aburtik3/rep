@@ -1,4 +1,5 @@
 import datetime as dt
+import time
 import unittest
 from unittest import mock
 
@@ -34,6 +35,23 @@ class DomainMonitorTests(unittest.TestCase):
         )
         self.assertEqual(result.expires_date, "2026-10-26")
         self.assertEqual(result.expires_time_utc, "21:00:00")
+
+    def test_force_refresh_bypasses_cached_unknown_result(self):
+        cached = domain_monitor.error_result("example.com", "example.com", TimeoutError("old timeout"))
+        domain_monitor._cache["example.com"] = (time.time(), domain_monitor.result_to_dict(cached))
+        try:
+            with (
+                mock.patch(
+                    "domain_monitor.check_rdap",
+                    return_value=domain_monitor.SourceResult(source="RDAP", expires_at="2026-10-26T21:00:00Z", available=False),
+                ),
+                mock.patch("domain_monitor.check_whois", return_value=domain_monitor.SourceResult(source="WHOIS", error="skip")),
+            ):
+                result = domain_monitor.check_domain("example.com", "example.com", force_refresh=True)
+            self.assertEqual(result.expires_at, "2026-10-26T21:00:00Z")
+            self.assertNotEqual(result.status, "unknown")
+        finally:
+            domain_monitor._cache.pop("example.com", None)
 
     def test_classify_thresholds(self):
         now = dt.datetime.now(dt.timezone.utc)

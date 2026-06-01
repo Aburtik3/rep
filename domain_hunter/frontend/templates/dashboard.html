@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="hero">
+  <div><h1>Сегодня: {{ today.strftime('%d.%m.%Y') }}</h1><p>Только важное: дата окончания регистрации и возраст домена.</p></div>
+  <form action="/collect" method="post" class="inline-form"><input name="topic" placeholder="hosting crypto finance"><input name="count" type="number" value="500"><button>Собрать</button></form>
+</section>
+<section class="stats period-stats">
+  <div><b>Сегодня</b><span>{{ today_domains|length }}</span></div>
+  <div><b>7 дней</b><span>{{ week_domains|length }}</span></div>
+  <div><b>30 дней</b><span>{{ month_domains|length }}</span></div>
+  <div><b>Полгода</b><span>{{ half_year_domains|length }}</span></div>
+  <div><b>Год</b><span>{{ year_domains|length }}</span></div>
+  <div><b>Всего</b><span>{{ stats.total or 0 }}</span></div>
+</section>
+<section class="grid one">
+  <article class="card"><h2>Освобождаются сегодня</h2>{% with domains=today_domains %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>В течение 7 дней</h2>{% with domains=week_domains[:50] %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>В течение 30 дней</h2>{% with domains=month_domains[:50] %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>В течение полугода</h2>{% with domains=half_year_domains[:50] %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>В течение года</h2>{% with domains=year_domains[:50] %}{% include '_table.html' %}{% endwith %}</article>
+</section>
+{% endblock %}

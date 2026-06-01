@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Домены</h1>
+
+<section class="card source-note">
+  <h2>Откуда берутся домены</h2>
+  <p>Система не генерирует случайные домены. Сбор идет из подключенных источников: пользовательский файл, GitHub, Product Hunt, G2/Capterra/TrustRadius, YC/BetaList/Crunchbase, поисковая выдача DuckDuckGo и curated-каталог реальных известных компаний как fallback.</p>
+  <p>Если сетевые каталоги недоступны или блокируют запросы, будет меньше результатов. В таблице есть колонка «Источник», чтобы было видно, откуда пришел каждый домен.</p>
+</section>
+<section class="card">
+  <form method="get" class="filters">
+    <input name="q" placeholder="домен, слово, заметка, регистратор" value="{{ filters.get('q','') }}">
+    <select name="category"><option value="">Все категории</option>{% for c in categories %}<option value="{{ c }}" {% if filters.get('category')==c %}selected{% endif %}>{{ category_label(c) }}</option>{% endfor %}</select>
+    <select name="status"><option value="">Все статусы</option>{% for s in statuses %}<option value="{{ s }}" {% if filters.get('status')==s %}selected{% endif %}>{{ status_label(s) }}</option>{% endfor %}</select>
+    <select name="month"><option value="">Все месяцы</option>{% for m in months %}<option value="{{ loop.index }}" {% if filters.get('month')==loop.index %}selected{% endif %}>{{ month_labels[loop.index0] }}</option>{% endfor %}</select>
+    <input name="rating_min" type="number" min="0" max="100" placeholder="рейтинг от" value="{{ filters.get('rating_min','') }}">
+    <button>Искать</button>
+  </form>
+</section>
+<section class="grid two">
+  <form action="/manual" method="post" class="card stack"><h2>Добавить домен</h2><input name="domain" placeholder="example.com"><input name="expiration_date" placeholder="2026-06-01"><select name="category">{% for c in categories %}<option value="{{ c }}">{{ category_label(c) }}</option>{% endfor %}</select><button>Добавить</button></form>
+  <form action="/recheck" method="post" class="card stack"><h2>Ручная перепроверка</h2><input name="group" placeholder="all, crypto, march, pendingdelete"><button>Перепроверить выбранную группу</button></form>
+</section>
+<section class="card">{% with domains=domains %}{% include '_table.html' %}{% endwith %}</section>
+{% endblock %}

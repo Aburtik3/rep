@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOMAIN HUNTER PRO</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">DOMAIN HUNTER PRO</div>
+  <nav>
+    <a href="/">Главная</a>
+    <a href="/domains">Домены</a>
+    <a href="/calendar">Календарь</a>
+    <a href="/export/csv">CSV</a>
+    <a href="/export/xlsx">XLSX</a>
+    <a href="/export/txt">TXT</a>
+  </nav>
+</header>
+<main class="container">{% block content %}{% endblock %}</main>
+</body>
+</html>

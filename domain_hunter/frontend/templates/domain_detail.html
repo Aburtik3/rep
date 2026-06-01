@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>{{ domain.domain }}</h1>
+<section class="grid two">
+  <article class="card">
+    <dl class="details">
+      <dt>Категория</dt><dd>{{ category_label(domain.category) }}</dd><dt>Источник</dt><dd>{{ domain.source }}</dd><dt>Регистратор</dt><dd>{{ domain.registrar or '—' }}</dd>
+      <dt>Дата создания</dt><dd>{{ domain.creation_date or '—' }}</dd><dt>Дата окончания</dt><dd>{{ domain.expiration_date or '—' }}</dd><dt>Дата обновления</dt><dd>{{ domain.updated_date or '—' }}</dd>
+      <dt>Статус</dt><dd>{{ status_label(domain.status) }}</dd><dt>Возраст</dt><dd>{{ age_years(domain.creation_date) or '—' }}</dd><dt>Рейтинг</dt><dd>{{ domain.rating }}</dd>
+    </dl>
+    <form action="/domains/{{ domain.id }}/delete" method="post" onsubmit="return confirm('Удалить домен {{ domain.domain }}?');"><button class="danger" type="submit">Удалить домен</button></form>
+  </article>
+  <form class="card stack" action="/domains/{{ domain.id }}/notes" method="post"><h2>Мой ежедневник</h2><select name="interest"><option value="">Без метки</option><option value="star" {% if domain.interest=='star' %}selected{% endif %}>⭐ Интересный</option><option value="fire" {% if domain.interest=='fire' %}selected{% endif %}>🔥 Очень интересный</option><option value="no" {% if domain.interest=='no' %}selected{% endif %}>❌ Не интересен</option></select><textarea name="notes" rows="8">{{ domain.notes or '' }}</textarea><button>Сохранить заметки</button></form>
+</section>
+<section class="card"><h2>История проверок</h2><table class="domains"><tr><th>Проверено</th><th>Статус</th><th>Регистратор</th><th>Окончание</th></tr>{% for h in history %}<tr><td>{{ h.checked_at }}</td><td>{{ h.status }}</td><td>{{ h.registrar }}</td><td>{{ h.expiration_date }}</td></tr>{% else %}<tr><td colspan="4" class="empty">Проверок пока нет.</td></tr>{% endfor %}</table></section>
+{% endblock %}

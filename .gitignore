@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+domain_hunter/database/*.sqlite3
+domain_hunter/results/exports/
+domain_hunter/results/*/
+domain_hunter/logs/*.log

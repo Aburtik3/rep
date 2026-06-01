@@ -7,7 +7,7 @@ CATALOG = {
     "finance": ["wise.com", "revolut.com", "stripe.com", "paypal.com", "squareup.com", "adyen.com", "plaid.com", "robinhood.com", "sofi.com", "intuit.com", "xero.com", "brex.com", "ramp.com", "chime.com", "monzo.com", "n26.com", "klarna.com", "affirm.com", "wealthfront.com", "betterment.com", "etrade.com", "interactivebrokers.com", "fidelity.com", "vanguard.com"],
     "payments": ["stripe.com", "paypal.com", "adyen.com", "checkout.com", "worldpay.com", "payoneer.com", "wise.com", "squareup.com", "braintreepayments.com", "authorize.net", "rapyd.net", "mollie.com", "payu.com", "razorpay.com", "airwallex.com"],
     "banking": ["chase.com", "bankofamerica.com", "wellsfargo.com", "citi.com", "capitalone.com", "monzo.com", "n26.com", "revolut.com", "starlingbank.com", "ally.com", "varomoney.com", "chime.com"],
-    "hosting": ["hostinger.com", "godaddy.com", "namecheap.com", "bluehost.com", "siteground.com", "digitalocean.com", "linode.com", "vultr.com", "hetzner.com", "ovhcloud.com", "cloudways.com", "wpengine.com", "kinsta.com", "dreamhost.com", "hostgator.com"],
+    "hosting": ["hostinger.com", "godaddy.com", "namecheap.com", "bluehost.com", "siteground.com", "digitalocean.com", "linode.com", "vultr.com", "hetzner.com", "ovhcloud.com", "cloudways.com", "wpengine.com", "kinsta.com", "dreamhost.com", "hostgator.com", "liquidweb.com", "inmotionhosting.com", "a2hosting.com", "greengeeks.com", "ionos.com", "rackspace.com", "contabo.com", "scaleway.com", "leaseweb.com", "servers.com", "serverpoint.com", "knownhost.com", "interserver.net", "accuwebhosting.com", "tmdhosting.com", "fastcomet.com", "mochahost.com", "arvixe.com", "pair.com", "mediatemple.net", "pressable.com", "pagely.com", "flywheel.com", "nexcess.net", "hostwinds.com", "hawklhost.com", "stablehost.com", "webhostingpad.com", "justhost.com", "fatcow.com", "ipage.com", "one.com", "transip.nl", "netcup.de", "strato.de", "aruba.it", "register.it", "amen.fr", "planethoster.com", "o2switch.fr", "infomaniak.com", "exoscale.com", "upcloud.com", "kamatera.com", "cloudsigma.com", "packet.com", "equinix.com", "phoenixnap.com", "coloexec.com", "psychz.net", "datto.com", "name.com", "networksolutions.com", "domain.com", "tucows.com", "enom.com"],
     "domains": ["namecheap.com", "godaddy.com", "dynadot.com", "porkbun.com", "namesilo.com", "gandi.net", "hover.com", "enom.com", "sedo.com", "dan.com", "afternic.com"],
     "ai": ["openai.com", "anthropic.com", "perplexity.ai", "huggingface.co", "midjourney.com", "stability.ai", "runwayml.com", "replicate.com", "jasper.ai", "copy.ai", "character.ai", "mistral.ai", "cohere.com", "deepmind.google", "scale.com"],
     "vpn": ["nordvpn.com", "expressvpn.com", "surfshark.com", "protonvpn.com", "privateinternetaccess.com", "cyberghostvpn.com", "mullvad.net", "windscribe.com", "tunnelbear.com", "ivacy.com"],
@@ -23,7 +23,7 @@ CATALOG = {
     "social": ["facebook.com", "instagram.com", "x.com", "linkedin.com", "tiktok.com", "reddit.com", "discord.com", "snapchat.com", "pinterest.com", "telegram.org"],
 }
 
-ALIASES = {"payments": "finance", "banking": "finance", "domains": "hosting"}
+ALIASES = {"payments": "finance", "banking": "finance", "domains": "hosting", "hostings": "hosting", "хостинг": "hosting", "хостинги": "hosting", "крипто": "crypto", "финансы": "finance", "платежи": "payments", "домены": "domains"}
 
 
 class Source:
@@ -32,9 +32,9 @@ class Source:
     def collect(self, keywords: list[str], limit: int) -> list[str]:
         results: list[str] = []
         for keyword in keywords or ["business"]:
-            key = keyword.lower()
+            raw_key = keyword.lower()
+            key = ALIASES.get(raw_key, raw_key)
             results.extend(CATALOG.get(key, []))
-            results.extend(CATALOG.get(ALIASES.get(key, ""), []))
             if len(results) >= limit:
                 break
         return results[:limit]

@@ -20,7 +20,7 @@ class CollectionResult:
 
 
 def load_sources():
-    preferred_order = {"custom": 0, "github": 1, "producthunt": 2, "company_directories": 3, "startup_directories": 4, "search_engines": 5, "curated_company_catalog": 6}
+    preferred_order = {"custom": 0, "github": 1, "producthunt": 2, "company_directories": 3, "software_directories": 4, "startup_directories": 5, "hackernews": 6, "commoncrawl": 7, "search_engines": 8, "curated_company_catalog": 9}
     plugins = []
     for module_info in pkgutil.iter_modules(sources_pkg.__path__):
         if module_info.name in {"base"} or module_info.name.startswith("_"):

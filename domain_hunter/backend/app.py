@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
@@ -22,9 +22,46 @@ STATIC_DIR = BASE_DIR / "frontend" / "static"
 TEMPLATE_DIR = BASE_DIR / "frontend" / "templates"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
+
+
+def format_date_ru(value: str | None) -> str:
+    if not value:
+        return "—"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            parsed = date.fromisoformat(value[:10])
+        except ValueError:
+            return value
+    return parsed.strftime("%d.%m.%Y")
+
+
+def expiration_class(value: str | None) -> str:
+    if not value:
+        return "date-empty"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            parsed = date.fromisoformat(value[:10])
+        except ValueError:
+            return "date-empty"
+    days = (parsed - date.today()).days
+    if days < 0:
+        return "date-expired"
+    if days <= 7:
+        return "date-hot"
+    if days <= 30:
+        return "date-soon"
+    return "date-ok"
+
+
 templates.env.globals["age_years"] = domain_age_years
 templates.env.globals["category_label"] = lambda value: CATEGORY_LABELS_RU.get(value, value or "—")
 templates.env.globals["status_label"] = lambda value: STATUS_LABELS_RU.get(value, value or "неизвестно")
+templates.env.globals["format_date_ru"] = format_date_ru
+templates.env.globals["expiration_class"] = expiration_class
 
 
 def parse_optional_int(value: str | int | None) -> int | None:
@@ -50,15 +87,11 @@ def dashboard(request: Request):
         "categories": CATEGORIES,
         "today": today,
         "today_domains": upcoming(0, today),
-        "tomorrow_domains": [r for r in upcoming(1, today + timedelta(days=1)) if r.get("expiration_date", "")[:10] == (today + timedelta(days=1)).isoformat()],
         "week_domains": upcoming(7, today),
         "month_domains": upcoming(30, today),
-        "top_domains": query_domains({"rating_min": 80}, limit=10),
-        "favorites": query_domains({"q": ""}, limit=10),
-        "latest": query_domains(limit=10),
-        "notes": [r for r in query_domains(limit=100) if r.get("notes")][:10],
+        "half_year_domains": upcoming(182, today),
+        "year_domains": upcoming(365, today),
     }
-    data["favorites"] = [r for r in query_domains(limit=100) if r.get("interest") in {"star", "fire"}][:10]
     return templates.TemplateResponse(request=request, name="dashboard.html", context=data)
 
 

@@ -62,3 +62,28 @@ def test_collect_crypto_saves_real_catalog_domains_without_generation(monkeypatc
     assert result.saved == 25
     assert len(result.domains) == 25
     assert all(not domain.startswith("cryptohub") for domain in result.domains)
+
+
+def test_hosting_catalog_has_many_real_domains_and_russian_alias():
+    from domain_hunter.sources.catalog import Source
+
+    domains = clean_domains(Source().collect(["хостинги"], 100))
+    assert len(domains) >= 60
+    assert "hostinger.com" in domains
+    assert all("хост" not in domain for domain in domains)
+
+
+def test_compact_table_keeps_only_required_columns():
+    source = __import__("pathlib").Path("domain_hunter/frontend/templates/_table.html").read_text(encoding="utf-8")
+    assert "<th>Дата окончания</th>" in source
+    assert "<th>Возраст</th>" in source
+    assert "<th>Регистратор</th>" not in source
+    assert "<th>Рейтинг</th>" not in source
+
+
+def test_dashboard_has_only_requested_period_blocks():
+    source = __import__("pathlib").Path("domain_hunter/frontend/templates/dashboard.html").read_text(encoding="utf-8")
+    assert "Избранные" not in source
+    assert "Последние добавленные" not in source
+    assert "Полгода" in source
+    assert "Год" in source

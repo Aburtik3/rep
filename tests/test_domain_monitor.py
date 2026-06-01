@@ -41,6 +41,45 @@ class DomainMonitorTests(unittest.TestCase):
         self.assertEqual(result.expires_date, "2026-10-26")
         self.assertEqual(result.expires_time_utc, "21:00:00")
 
+    def test_single_free_vote_stays_unknown_until_confirmed(self):
+        result = domain_monitor.combine_results(
+            "maybe-free.com",
+            "maybe-free.com",
+            [domain_monitor.SourceResult(source="RDAP", available=True)],
+        )
+        self.assertEqual(result.status, "unknown")
+        self.assertIsNone(result.available)
+        self.assertIn("Только один источник", result.notes[0])
+
+    def test_occupied_recheck_overrides_free_vote(self):
+        result = domain_monitor.combine_results(
+            "busy.com",
+            "busy.com",
+            [
+                domain_monitor.SourceResult(source="RDAP", available=True),
+                domain_monitor.SourceResult(source="whois-service.ru", available=False),
+            ],
+        )
+        self.assertEqual(result.status, "unknown")
+        self.assertFalse(result.available)
+        self.assertIn("свободным не помечаем", result.notes[0])
+
+    def test_two_free_votes_confirm_critical_available(self):
+        result = domain_monitor.combine_results(
+            "free.com",
+            "free.com",
+            [
+                domain_monitor.SourceResult(source="RDAP", available=True),
+                domain_monitor.SourceResult(source="whois-service.ru", available=True),
+            ],
+        )
+        self.assertEqual(result.status, "critical")
+        self.assertTrue(result.available)
+
+    def test_whois_service_ru_text_parser(self):
+        self.assertFalse(domain_monitor.parse_availability_text("Домен занят. Whois-сервер вернул данные."))
+        self.assertTrue(domain_monitor.parse_availability_text("Домен свободен для регистрации"))
+
     def test_force_refresh_bypasses_cached_unknown_result(self):
         cached = domain_monitor.error_result("example.com", "example.com", TimeoutError("old timeout"))
         domain_monitor._cache["example.com"] = (time.time(), domain_monitor.result_to_dict(cached))
@@ -57,6 +96,18 @@ class DomainMonitorTests(unittest.TestCase):
             self.assertNotEqual(result.status, "unknown")
         finally:
             domain_monitor._cache.pop("example.com", None)
+
+    def test_check_domain_rechecks_free_votes_with_external_services(self):
+        with (
+            mock.patch("domain_monitor.check_rdap", return_value=domain_monitor.SourceResult(source="RDAP", available=True)),
+            mock.patch("domain_monitor.check_whois", return_value=domain_monitor.SourceResult(source="WHOIS", error="skip")),
+            mock.patch("domain_monitor.check_dns_presence", return_value=domain_monitor.SourceResult(source="DNS", error="no dns")) as dns_mock,
+            mock.patch("domain_monitor.check_whois_service_ru", return_value=domain_monitor.SourceResult(source="whois-service.ru", available=False)) as service_mock,
+        ):
+            result = domain_monitor.check_domain("example.com", "example.com", force_refresh=True)
+        dns_mock.assert_called_once_with("example.com")
+        service_mock.assert_called_once_with("example.com")
+        self.assertFalse(result.available)
 
 
     def test_result_sort_puts_hot_domains_first(self):

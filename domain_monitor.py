@@ -98,6 +98,26 @@ FREE_MARKERS = (
     "domain name has not been registered",
 )
 
+OCCUPIED_MARKERS = (
+    "domain status:",
+    "registrar:",
+    "name server:",
+    "nserver:",
+    "state: registered",
+    "домен занят",
+    "доменное имя занято",
+    "домен зарегистрирован",
+    "уже зарегистрирован",
+    "whois-сервер",
+)
+
+WHOIS_SERVICE_RU_URLS = (
+    "http://www.whois-service.ru/?domain={domain}",
+    "http://www.whois-service.ru/?q={domain}",
+    "http://www.whois-service.ru/whois/{domain}",
+    "http://www.whois-service.ru/lookup/{domain}",
+)
+
 STATUS_LABELS = {
     "safe": "ОК: больше 6 месяцев",
     "warning": "Скоро: 1–6 месяцев",
@@ -238,6 +258,13 @@ def fetch_json(url: str) -> Any:
         return json.loads(response.read().decode("utf-8", errors="replace"))
 
 
+def fetch_text(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,text/plain,*/*"})
+    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+        charset = response.headers.get_content_charset() or "utf-8"
+        return response.read(256_000).decode(charset, errors="replace")
+
+
 def rdap_bootstrap() -> list[dict[str, Any]]:
     global _rdap_bootstrap
     if _rdap_bootstrap is None:
@@ -340,6 +367,50 @@ def check_whois(domain: str) -> SourceResult:
         return SourceResult(source=f"WHOIS ({server})", error=str(exc))
 
 
+def check_dns_presence(domain: str) -> SourceResult:
+    try:
+        socket.getaddrinfo(domain, None)
+        return SourceResult(source="DNS", available=False, raw_hint="домен резолвится в DNS")
+    except socket.gaierror as exc:
+        return SourceResult(source="DNS", error=f"DNS не подтвердил занятость: {exc}")
+    except Exception as exc:  # noqa: BLE001 - show concise source-specific error in UI.
+        return SourceResult(source="DNS", error=str(exc))
+
+
+def parse_availability_text(text: str) -> bool | None:
+    lower = re.sub(r"\s+", " ", text.lower())
+    if "не занят" in lower or "домен свободен" in lower or "свободен для регистрации" in lower:
+        return True
+    occupied = any(marker in lower for marker in OCCUPIED_MARKERS)
+    free = any(marker in lower for marker in FREE_MARKERS)
+    if occupied and not free:
+        return False
+    if free and not occupied:
+        return True
+    return None
+
+
+def check_whois_service_ru(domain: str) -> SourceResult:
+    errors: list[str] = []
+    quoted_domain = urllib.parse.quote(domain)
+    for template in WHOIS_SERVICE_RU_URLS:
+        url = template.format(domain=quoted_domain)
+        try:
+            verdict = parse_availability_text(fetch_text(url))
+            if verdict is not None:
+                return SourceResult(source="whois-service.ru", available=verdict, raw_hint=url)
+            errors.append(f"нет явного статуса: {url}")
+        except Exception as exc:  # noqa: BLE001 - keep trying alternate public URLs.
+            errors.append(str(exc))
+    return SourceResult(source="whois-service.ru", error="; ".join(errors[-2:]) or "нет ответа")
+
+
+def needs_availability_recheck(sources: list[SourceResult]) -> bool:
+    has_free_vote = any(source.available is True for source in sources)
+    has_expiry = any(source.expires_at for source in sources)
+    return has_free_vote and not has_expiry
+
+
 def classify(expiry: dt.datetime | None, available: bool | None) -> tuple[str, int | None]:
     if available is True:
         return "critical", None
@@ -367,15 +438,25 @@ def combine_results(domain: str, unicode_domain: str, sources: list[SourceResult
         if parsed:
             expiries.append(parsed)
 
-    available = True if available_votes and not expiries else False if expiries else None
+    occupied_votes = sum(1 for source in sources if source.available is False)
+    if expiries or occupied_votes:
+        available = False
+    elif available_votes >= 2:
+        available = True
+    else:
+        available = None
     expiry = min(expiries) if expiries else None
     if len(expiries) >= 2:
         spread = (max(expiries) - min(expiries)).days
         if spread > 2:
             notes.append(f"Источники расходятся по дате на {spread} дн.; показана ближайшая дата.")
-    if available_votes and expiries:
-        notes.append("Один источник считает домен свободным, другой нашёл дату — проверьте вручную.")
-    if not expiries and not available_votes:
+    if available_votes and (expiries or occupied_votes):
+        notes.append("Один источник считает домен свободным, другой подтверждает занятость — свободным не помечаем.")
+    if available_votes == 1 and not expiries and not occupied_votes:
+        notes.append("Только один источник считает домен свободным; нужна повторная проверка в нескольких сервисах.")
+    if occupied_votes and not expiries and not available_votes:
+        notes.append("Источник подтверждает, что домен занят, но точную дату окончания получить не удалось.")
+    if not expiries and not available_votes and not occupied_votes:
         notes.append("Нет достоверной даты: зона может скрывать expiry или временно не отвечать.")
 
     status, days_left = classify(expiry, available)
@@ -406,6 +487,8 @@ def check_domain(domain: str, unicode_domain: str, force_refresh: bool = False) 
             return result_from_dict(cached[1])
 
     sources = [check_rdap(domain), check_whois(domain)]
+    if needs_availability_recheck(sources):
+        sources.extend([check_dns_presence(domain), check_whois_service_ru(domain)])
     result = combine_results(domain, unicode_domain, sources)
     with _cache_lock:
         _cache[cache_key] = (now, result_to_dict(result))

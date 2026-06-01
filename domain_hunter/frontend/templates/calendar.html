@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Календарь доменов — {{ month_name }} {{ year }}</h1>
+<section class="card calendar">
+{% for day, domains in by_day.items()|sort %}
+  <details open>
+    <summary>{{ day }} — {{ domains|length }} domains</summary>
+    {% with domains=domains %}{% include '_table.html' %}{% endwith %}
+  </details>
+{% else %}<p class="empty">No expirations this month.</p>{% endfor %}
+</section>
+{% endblock %}

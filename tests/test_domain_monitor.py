@@ -10,6 +10,11 @@ class DomainMonitorTests(unittest.TestCase):
     def test_normalize_idn(self):
         self.assertEqual(domain_monitor.normalize_domain("https://пример.рф/path"), ("xn--e1afmkfd.xn--p1ai", "пример.рф"))
 
+    def test_normalize_subdomain_to_registrable_domain(self):
+        self.assertEqual(domain_monitor.normalize_domain("asia.payments.com"), ("payments.com", "payments.com"))
+        self.assertEqual(domain_monitor.normalize_domain("global.alipay.com"), ("alipay.com", "alipay.com"))
+        self.assertEqual(domain_monitor.normalize_domain("www.example.co.uk"), ("example.co.uk", "example.co.uk"))
+
     def test_parse_russian_paid_until(self):
         text = """
         Зарегистрирован:             2007-10-26T20:00:00Z
@@ -52,6 +57,24 @@ class DomainMonitorTests(unittest.TestCase):
             self.assertNotEqual(result.status, "unknown")
         finally:
             domain_monitor._cache.pop("example.com", None)
+
+
+    def test_result_sort_puts_hot_domains_first(self):
+        free = domain_monitor.error_result("free.com", "free.com", Exception("free"))
+        free.status = "critical"
+        free.days_left = None
+        now = dt.datetime.now(dt.timezone.utc)
+        safe = domain_monitor.combine_results(
+            "safe.com",
+            "safe.com",
+            [domain_monitor.SourceResult(source="test", expires_at=domain_monitor.date_to_text(now + dt.timedelta(days=220)), available=False)],
+        )
+        danger = domain_monitor.combine_results(
+            "danger.com",
+            "danger.com",
+            [domain_monitor.SourceResult(source="test", expires_at=domain_monitor.date_to_text(now + dt.timedelta(days=20)), available=False)],
+        )
+        self.assertEqual([r.domain for r in sorted([safe, danger, free], key=domain_monitor.result_sort_key)], ["free.com", "danger.com", "safe.com"])
 
     def test_classify_thresholds(self):
         now = dt.datetime.now(dt.timezone.utc)

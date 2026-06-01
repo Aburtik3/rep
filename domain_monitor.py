@@ -106,6 +106,22 @@ STATUS_LABELS = {
     "unknown": "Не удалось проверить",
 }
 
+# Small built-in public suffix helper for common multi-label zones. This is not
+# a full Public Suffix List replacement, but it prevents common subdomain inputs
+# such as `global.alipay.com` from being checked as separate domain names, and
+# keeps popular ccTLD registrations like `example.co.uk` intact.
+MULTI_LABEL_PUBLIC_SUFFIXES = {
+    "ac.uk", "co.uk", "gov.uk", "ltd.uk", "me.uk", "net.uk", "org.uk", "plc.uk",
+    "com.au", "net.au", "org.au", "edu.au",
+    "co.jp", "ne.jp", "or.jp",
+    "com.br", "net.br", "org.br",
+    "com.cn", "net.cn", "org.cn",
+    "com.tr", "net.tr", "org.tr",
+    "com.ua", "net.ua", "org.ua",
+    "co.nz", "net.nz", "org.nz",
+    "co.in", "firm.in", "net.in", "org.in",
+}
+
 _cache_lock = threading.Lock()
 _cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _rdap_bootstrap: list[dict[str, Any]] | None = None
@@ -136,6 +152,16 @@ class DomainResult:
     notes: list[str]
 
 
+def registrable_domain(ascii_domain: str) -> str:
+    labels = ascii_domain.strip(".").lower().split(".")
+    if len(labels) <= 2:
+        return ascii_domain
+    two_label_suffix = ".".join(labels[-2:])
+    if two_label_suffix in MULTI_LABEL_PUBLIC_SUFFIXES and len(labels) >= 3:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
 def normalize_domain(value: str) -> tuple[str, str] | None:
     value = value.strip().lower()
     value = re.sub(r"^https?://", "", value)
@@ -143,11 +169,15 @@ def normalize_domain(value: str) -> tuple[str, str] | None:
     if not value or "." not in value:
         return None
     try:
-        ascii_domain = value.encode("idna").decode("ascii")
-        unicode_domain = ascii_domain.encode("ascii").decode("idna")
+        ascii_input = value.encode("idna").decode("ascii")
     except UnicodeError:
         return None
-    if not re.fullmatch(r"[a-z0-9.-]+", ascii_domain) or ".." in ascii_domain:
+    if not re.fullmatch(r"[a-z0-9.-]+", ascii_input) or ".." in ascii_input:
+        return None
+    ascii_domain = registrable_domain(ascii_input)
+    try:
+        unicode_domain = ascii_domain.encode("ascii").decode("idna")
+    except UnicodeError:
         return None
     return ascii_domain, unicode_domain
 
@@ -422,33 +452,35 @@ INDEX_HTML = r"""<!doctype html>
     :root { color-scheme: light; font-family: Inter, system-ui, -apple-system, Segoe UI, Arial, sans-serif; }
     body { margin: 0; background: #f5f7fb; color: #172033; }
     header { background: linear-gradient(135deg, #172033, #3454d1); color: white; padding: 28px 36px; }
-    main { padding: 24px 36px 48px; }
+    main { padding: 18px 24px 36px; }
     textarea { width: 100%; min-height: 170px; border: 1px solid #c9d3e6; border-radius: 12px; padding: 14px; font: 15px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; box-sizing: border-box; }
     button { border: 0; border-radius: 10px; background: #3454d1; color: white; padding: 12px 18px; font-weight: 700; cursor: pointer; }
     button:disabled { opacity: .55; cursor: wait; }
     button.secondary { background: #eef3ff; color: #263a8b; }
     button.mini { padding: 7px 10px; font-size: 13px; }
     label.autoretry { display: inline-flex; align-items: center; gap: 6px; color: #5f6b7a; font-size: 14px; }
-    .panel { background: white; border-radius: 16px; box-shadow: 0 10px 30px rgba(23, 32, 51, .08); padding: 20px; margin-bottom: 20px; }
+    .panel { background: white; border-radius: 14px; box-shadow: 0 10px 30px rgba(23, 32, 51, .08); padding: 14px; margin-bottom: 14px; }
     .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
     .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-    .pill { border-radius: 999px; padding: 6px 10px; color: white; font-size: 13px; font-weight: 700; }
+    .pill { border-radius: 999px; padding: 3px 7px; color: white; font-size: 12px; font-weight: 700; white-space: nowrap; }
     .safe { background: #21a366; }
     .warning { background: #f4c430; color: #2b2400; }
     .danger { background: #ff1f1f; }
     .critical { background: #7f0000; }
     .unknown { background: #6b7280; }
-    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; background: white; }
-    th, td { padding: 11px 12px; border-bottom: 1px solid #e6ebf5; vertical-align: top; text-align: left; }
+    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; background: white; font-size: 13px; table-layout: auto; }
+    th, td { padding: 5px 7px; border-bottom: 1px solid #e6ebf5; vertical-align: middle; text-align: left; line-height: 1.15; }
     th { position: sticky; top: 0; background: #eef3ff; z-index: 1; }
     tr.safe { background: #e9f8ef; }
     tr.warning { background: #fff6cf; }
     tr.danger { background: #ffe1e1; }
     tr.critical { background: #ffd1d1; color: #280000; }
     tr.unknown { background: #eef0f4; }
-    .muted { color: #5f6b7a; font-size: 13px; }
+    .muted { color: #5f6b7a; font-size: 12px; }
     .nowrap { white-space: nowrap; }
-    details { max-width: 520px; }
+    .domain-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    details { max-width: 340px; }
+    summary { cursor: pointer; white-space: nowrap; }
     .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
     .card { border-radius: 14px; color: white; padding: 14px; font-weight: 800; }
     .card small { display: block; opacity: .9; font-weight: 600; margin-top: 4px; }
@@ -486,8 +518,11 @@ INDEX_HTML = r"""<!doctype html>
   </main>
 <script>
 const $ = (id) => document.getElementById(id);
+const CHECK_CONCURRENCY = 12;
+const STATUS_RANK = {critical: 0, danger: 1, warning: 2, safe: 3, unknown: 4};
 let lastResults = [];
 let autoRetryTimer = null;
+let activeRun = 0;
 function parseDomains(text) {
   return [...new Set(text.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean))];
 }
@@ -503,8 +538,11 @@ function unknownResults() {
 }
 function sortResults(results) {
   return results.sort((a, b) => {
-    const ad = a.days_left ?? 999999;
-    const bd = b.days_left ?? 999999;
+    const ar = STATUS_RANK[a.status] ?? 5;
+    const br = STATUS_RANK[b.status] ?? 5;
+    if (ar !== br) return ar - br;
+    const ad = a.status === 'critical' && a.days_left == null ? -999999 : (a.days_left ?? 999999);
+    const bd = b.status === 'critical' && b.days_left == null ? -999999 : (b.days_left ?? 999999);
     if (ad !== bd) return ad - bd;
     return a.domain.localeCompare(b.domain);
   });
@@ -523,6 +561,26 @@ function mergeResults(newResults) {
   const byDomain = new Map(lastResults.map(r => [r.domain, r]));
   for (const result of newResults) byDomain.set(result.domain, result);
   render(sortResults([...byDomain.values()]));
+}
+async function checkProgressively(domains, forceRefresh, runId, progressLabel) {
+  let completed = 0;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < domains.length && runId === activeRun) {
+      const domain = domains[cursor++];
+      try {
+        mergeResults(await checkDomains([domain], forceRefresh));
+      } catch (error) {
+        $('progress').textContent = `Ошибка ${domain}: ${error.message}`;
+      } finally {
+        completed += 1;
+        if (runId === activeRun) {
+          $('progress').textContent = `${progressLabel}: ${completed}/${domains.length}. Уже выведено: ${lastResults.length}. Не удалось: ${unknownResults().length}`;
+        }
+      }
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(CHECK_CONCURRENCY, domains.length)}, worker));
 }
 function updateControls() {
   const hasResults = lastResults.length > 0;
@@ -543,14 +601,14 @@ function render(results) {
     const notes = r.notes && r.notes.length ? `<div class="muted">${r.notes.map(escapeHtml).join('<br>')}</div>` : '';
     const retryHint = r.status === 'unknown' ? '<div class="muted">Можно обновить позже: публичный WHOIS/RDAP часто отвечает после паузы.</div>' : '';
     return `<tr class="${r.status}">
-      <td><strong>${escapeHtml(r.unicode_domain)}</strong><div class="muted">${escapeHtml(r.domain)}</div></td>
+      <td class="domain-cell" title="${escapeHtml(r.domain)}"><strong>${escapeHtml(r.unicode_domain)}</strong></td>
       <td class="nowrap">${escapeHtml(r.expires_date || '—')}</td>
       <td class="nowrap"><strong>${escapeHtml(r.expires_time_utc || '—')}</strong></td>
       <td class="nowrap">${fmtDate(r.expires_at)}</td>
       <td class="nowrap">${r.days_left ?? '—'}</td>
       <td><span class="pill ${r.status}">${escapeHtml(r.status_label)}</span></td>
-      <td>${escapeHtml(r.confidence)}</td>
-      <td><details><summary>показать</summary>${sourceHtml}${notes}${retryHint}</details></td>
+      <td class="nowrap">${escapeHtml(r.confidence)}</td>
+      <td><details><summary>детали</summary>${sourceHtml}${notes}${retryHint}</details></td>
       <td><button class="mini secondary refresh-one" data-domain="${escapeHtml(r.domain)}">Обновить</button></td>
     </tr>`;
   }).join('') || '<tr><td colspan="9" class="muted">Нет результатов.</td></tr>';
@@ -558,14 +616,16 @@ function render(results) {
 async function runFullCheck() {
   const domains = parseDomains($('domains').value);
   if (!domains.length) { alert('Вставьте список доменов.'); return; }
+  activeRun += 1;
+  const runId = activeRun;
+  lastResults = [];
+  render([]);
   $('check').disabled = true;
   $('retryFailed').disabled = true;
-  $('progress').textContent = `Проверяем ${domains.length} доменов...`;
+  $('progress').textContent = `Проверяем ${domains.length} доменов, результаты будут появляться сразу...`;
   try {
-    render(await checkDomains(domains));
-    $('progress').textContent = `Готово: ${lastResults.length} доменов, не удалось проверить: ${unknownResults().length}, ${new Date().toLocaleString()}`;
-  } catch (error) {
-    $('progress').textContent = `Ошибка: ${error.message}`;
+    await checkProgressively(domains, false, runId, 'Проверено');
+    $('progress').textContent = `Готово: ${lastResults.length} основных доменов, не удалось проверить: ${unknownResults().length}, ${new Date().toLocaleString()}`;
   } finally {
     $('check').disabled = false;
     updateControls();
@@ -573,16 +633,13 @@ async function runFullCheck() {
 }
 async function refreshDomains(domains, label = 'Обновляем') {
   if (!domains.length) return;
+  activeRun += 1;
+  const runId = activeRun;
   $('retryFailed').disabled = true;
   $('progress').textContent = `${label}: ${domains.length}...`;
-  try {
-    mergeResults(await checkDomains(domains, true));
-    $('progress').textContent = `Обновлено: ${domains.length}, осталось неудачных: ${unknownResults().length}, ${new Date().toLocaleString()}`;
-  } catch (error) {
-    $('progress').textContent = `Ошибка обновления: ${error.message}`;
-  } finally {
-    updateControls();
-  }
+  await checkProgressively(domains, true, runId, label);
+  $('progress').textContent = `Обновлено: ${domains.length}, осталось неудачных: ${unknownResults().length}, ${new Date().toLocaleString()}`;
+  updateControls();
 }
 $('check').addEventListener('click', runFullCheck);
 $('retryFailed').addEventListener('click', () => refreshDomains(unknownResults().map(r => r.domain), 'Обновляем неудачные'));
@@ -620,6 +677,14 @@ $('csv').addEventListener('click', () => {
 </body>
 </html>
 """
+
+
+
+
+def result_sort_key(result: DomainResult) -> tuple[int, int, str]:
+    status_rank = {"critical": 0, "danger": 1, "warning": 2, "safe": 3, "unknown": 4}
+    day_rank = -999999 if result.status == "critical" and result.days_left is None else (result.days_left if result.days_left is not None else 999999)
+    return status_rank.get(result.status, 5), day_rank, result.domain
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -677,7 +742,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         results.append(future.result())
                     except Exception as exc:  # noqa: BLE001 - one failed domain must not abort all results.
                         results.append(error_result(domain, unicode_domain, exc))
-            results.sort(key=lambda r: (999999 if r.days_left is None else r.days_left, r.domain))
+            results.sort(key=result_sort_key)
             self.send_json(200, {"results": [result_to_dict(result) for result in results]})
         except Exception as exc:  # noqa: BLE001 - return JSON error to UI.
             self.send_json(400, {"error": str(exc)})

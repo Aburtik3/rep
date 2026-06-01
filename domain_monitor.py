@@ -29,6 +29,21 @@ WHOIS_TIMEOUT = 12
 MAX_DOMAINS_PER_REQUEST = 2000
 MAX_WORKERS = 24
 
+# Direct RDAP bases for common zones. This keeps checks useful even when the
+# IANA bootstrap endpoint is slow or temporarily unavailable. Unknown TLDs still
+# try the IANA bootstrap below.
+RDAP_SERVERS: dict[str, str] = {
+    "com": "https://rdap.verisign.com/com/v1/",
+    "net": "https://rdap.verisign.com/net/v1/",
+    "org": "https://rdap.publicinterestregistry.org/rdap/",
+    "info": "https://rdap.identitydigital.services/rdap/",
+    "biz": "https://rdap.identitydigital.services/rdap/",
+    "ru": "https://rdap.tcinet.ru/",
+    "рф": "https://rdap.tcinet.ru/",
+    "xn--p1ai": "https://rdap.tcinet.ru/",
+    "su": "https://rdap.tcinet.ru/",
+}
+
 # Helpful direct WHOIS servers for popular zones and zones where RDAP can be
 # incomplete or unavailable. Unknown TLDs fall back to whois.iana.org referral.
 WHOIS_SERVERS: dict[str, str] = {
@@ -112,6 +127,8 @@ class DomainResult:
     status: str
     status_label: str
     expires_at: str | None
+    expires_date: str | None
+    expires_time_utc: str | None
     days_left: int | None
     available: bool | None
     confidence: str
@@ -173,6 +190,18 @@ def date_to_text(value: dt.datetime | None) -> str | None:
     return value.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def date_part(value: dt.datetime | None) -> str | None:
+    if not value:
+        return None
+    return value.astimezone(dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+def time_part_utc(value: dt.datetime | None) -> str | None:
+    if not value:
+        return None
+    return value.astimezone(dt.timezone.utc).strftime("%H:%M:%S")
+
+
 def fetch_json(url: str) -> Any:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
@@ -189,6 +218,8 @@ def rdap_bootstrap() -> list[dict[str, Any]]:
 
 def rdap_base_for_tld(tld: str) -> str | None:
     tld = tld.lower().lstrip(".")
+    if tld in RDAP_SERVERS:
+        return RDAP_SERVERS[tld]
     for service in rdap_bootstrap():
         tlds, urls = service[0], service[1]
         if tld in [item.lower() for item in tlds] and urls:
@@ -198,7 +229,10 @@ def rdap_base_for_tld(tld: str) -> str | None:
 
 def check_rdap(domain: str) -> SourceResult:
     tld = domain.rsplit(".", 1)[-1]
-    base = rdap_base_for_tld(tld)
+    try:
+        base = rdap_base_for_tld(tld)
+    except Exception as exc:  # noqa: BLE001 - RDAP bootstrap/network errors must not fail the whole batch.
+        return SourceResult(source="RDAP", error=f"ошибка RDAP bootstrap: {exc}")
     if not base:
         return SourceResult(source="RDAP", error="RDAP для зоны не найден")
     url = urllib.parse.urljoin(base.rstrip("/") + "/", "domain/" + urllib.parse.quote(domain))
@@ -323,6 +357,8 @@ def combine_results(domain: str, unicode_domain: str, sources: list[SourceResult
         status=status,
         status_label=STATUS_LABELS[status],
         expires_at=date_to_text(expiry),
+        expires_date=date_part(expiry),
+        expires_time_utc=time_part_utc(expiry),
         days_left=days_left,
         available=available,
         confidence=confidence,
@@ -345,6 +381,24 @@ def check_domain(domain: str, unicode_domain: str) -> DomainResult:
         _cache[cache_key] = (now, result_to_dict(result))
     return result
 
+
+
+def error_result(domain: str, unicode_domain: str, exc: Exception) -> DomainResult:
+    source = SourceResult(source="internal", error=str(exc))
+    return DomainResult(
+        domain=domain,
+        unicode_domain=unicode_domain,
+        status="unknown",
+        status_label=STATUS_LABELS["unknown"],
+        expires_at=None,
+        expires_date=None,
+        expires_time_utc=None,
+        days_left=None,
+        available=None,
+        confidence="низкая",
+        sources=[source],
+        notes=["Проверка этого домена упала по таймауту/ошибке, остальные домены не остановлены."],
+    )
 
 def result_to_dict(result: DomainResult) -> dict[str, Any]:
     data = asdict(result)
@@ -420,8 +474,8 @@ INDEX_HTML = r"""<!doctype html>
     <section id="summary" class="summary" hidden></section>
     <section class="panel" style="padding:0; overflow:auto; max-height:70vh;">
       <table>
-        <thead><tr><th>Домен</th><th>Оплачен до</th><th>Дней</th><th>Статус</th><th>Надёжность</th><th>Источники и заметки</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="6" class="muted">Результаты появятся здесь.</td></tr></tbody>
+        <thead><tr><th>Домен</th><th>Дата окончания</th><th>Час окончания UTC</th><th>Оплачен до</th><th>Дней</th><th>Статус</th><th>Надёжность</th><th>Источники и заметки</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="muted">Результаты появятся здесь.</td></tr></tbody>
       </table>
     </section>
   </main>
@@ -451,13 +505,15 @@ function render(results) {
     const notes = r.notes && r.notes.length ? `<div class="muted">${r.notes.map(escapeHtml).join('<br>')}</div>` : '';
     return `<tr class="${r.status}">
       <td><strong>${escapeHtml(r.unicode_domain)}</strong><div class="muted">${escapeHtml(r.domain)}</div></td>
+      <td class="nowrap">${escapeHtml(r.expires_date || '—')}</td>
+      <td class="nowrap"><strong>${escapeHtml(r.expires_time_utc || '—')}</strong></td>
       <td class="nowrap">${fmtDate(r.expires_at)}</td>
       <td class="nowrap">${r.days_left ?? '—'}</td>
       <td><span class="pill ${r.status}">${escapeHtml(r.status_label)}</span></td>
       <td>${escapeHtml(r.confidence)}</td>
       <td><details><summary>показать</summary>${sourceHtml}${notes}</details></td>
     </tr>`;
-  }).join('') || '<tr><td colspan="6" class="muted">Нет результатов.</td></tr>';
+  }).join('') || '<tr><td colspan="8" class="muted">Нет результатов.</td></tr>';
 }
 $('check').addEventListener('click', async () => {
   const domains = parseDomains($('domains').value);
@@ -477,7 +533,7 @@ $('check').addEventListener('click', async () => {
   }
 });
 $('csv').addEventListener('click', () => {
-  const header = ['domain','expires_at','days_left','status','confidence','notes'];
+  const header = ['domain','expires_date','expires_time_utc','expires_at','days_left','status','confidence','notes'];
   const lines = [header.join(',')].concat(lastResults.map(r => header.map(k => '"' + String(k === 'notes' ? (r.notes||[]).join('; ') : (r[k] ?? '')).replace(/"/g, '""') + '"').join(',')));
   const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a');
@@ -535,8 +591,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     normalized.append(parsed)
                     seen.add(parsed[0])
             with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                futures = [executor.submit(check_domain, domain, unicode_domain) for domain, unicode_domain in normalized]
-                results = [future.result() for future in concurrent.futures.as_completed(futures)]
+                future_domains = {
+                    executor.submit(check_domain, domain, unicode_domain): (domain, unicode_domain)
+                    for domain, unicode_domain in normalized
+                }
+                results = []
+                for future in concurrent.futures.as_completed(future_domains):
+                    domain, unicode_domain = future_domains[future]
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:  # noqa: BLE001 - one failed domain must not abort all results.
+                        results.append(error_result(domain, unicode_domain, exc))
             results.sort(key=lambda r: (999999 if r.days_left is None else r.days_left, r.domain))
             self.send_json(200, {"results": [result_to_dict(result) for result in results]})
         except Exception as exc:  # noqa: BLE001 - return JSON error to UI.

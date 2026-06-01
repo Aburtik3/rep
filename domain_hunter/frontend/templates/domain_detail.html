@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>{{ domain.domain }}</h1>
+<section class="grid two">
+  <article class="card">
+    <dl class="details">
+      <dt>Category</dt><dd>{{ domain.category }}</dd><dt>Source</dt><dd>{{ domain.source }}</dd><dt>Registrar</dt><dd>{{ domain.registrar or '—' }}</dd>
+      <dt>Creation date</dt><dd>{{ domain.creation_date or '—' }}</dd><dt>Expiration date</dt><dd>{{ domain.expiration_date or '—' }}</dd><dt>Updated date</dt><dd>{{ domain.updated_date or '—' }}</dd>
+      <dt>Status</dt><dd>{{ domain.status or 'unknown' }}</dd><dt>Age</dt><dd>{{ age_years(domain.creation_date) or '—' }}</dd><dt>Rating</dt><dd>{{ domain.rating }}</dd>
+    </dl>
+  </article>
+  <form class="card stack" action="/domains/{{ domain.id }}/notes" method="post"><h2>Мой ежедневник</h2><select name="interest"><option value="">Без метки</option><option value="star" {% if domain.interest=='star' %}selected{% endif %}>⭐ Интересный</option><option value="fire" {% if domain.interest=='fire' %}selected{% endif %}>🔥 Очень интересный</option><option value="no" {% if domain.interest=='no' %}selected{% endif %}>❌ Не интересен</option></select><textarea name="notes" rows="8">{{ domain.notes or '' }}</textarea><button>Save notes</button></form>
+</section>
+<section class="card"><h2>История проверок</h2><table class="domains"><tr><th>Checked</th><th>Status</th><th>Registrar</th><th>Expiration</th></tr>{% for h in history %}<tr><td>{{ h.checked_at }}</td><td>{{ h.status }}</td><td>{{ h.registrar }}</td><td>{{ h.expiration_date }}</td></tr>{% else %}<tr><td colspan="4" class="empty">No checks yet.</td></tr>{% endfor %}</table></section>
+{% endblock %}

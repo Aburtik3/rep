@@ -1,0 +1,19 @@
+<table class="domains">
+  <thead><tr><th>Domain</th><th>Category</th><th>Status</th><th>Expiration</th><th>Drop time</th><th>Registrar</th><th>Age</th><th>Rating</th></tr></thead>
+  <tbody>
+  {% for d in domains %}
+    <tr>
+      <td><a href="/domains/{{ d.id }}">{{ d.domain }}</a></td>
+      <td><span class="pill">{{ d.category }}</span></td>
+      <td>{{ d.status or 'unknown' }}</td>
+      <td>{{ d.expiration_date or '—' }}</td>
+      <td>{{ 'UTC 14:00' if d.status == 'pendingDelete' else '—' }}</td>
+      <td>{{ d.registrar or '—' }}</td>
+      <td>{{ (age_years(d.creation_date) ~ ' years') if age_years(d.creation_date) is not none else '—' }}</td>
+      <td><strong>{{ d.rating }}</strong></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="empty">No domains found</td></tr>
+  {% endfor %}
+  </tbody>
+</table>

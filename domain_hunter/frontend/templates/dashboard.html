@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="hero">
+  <div><h1>Сегодня: {{ today.strftime('%d.%m.%Y') }}</h1><p>CRM-панель для анализа, отбора и отслеживания доменов.</p></div>
+  <form action="/collect" method="post" class="inline-form"><input name="topic" placeholder="crypto finance"><input name="count" type="number" value="100"><button>Collect</button></form>
+</section>
+<section class="stats">
+  <div><b>Всего доменов</b><span>{{ stats.total or 0 }}</span></div>
+  {% for cat in ['crypto','finance','hosting','ai','shopping','education','vpn','other'] %}<div><b>{{ cat|capitalize }}</b><span>{{ stats.get(cat, 0) }}</span></div>{% endfor %}
+</section>
+<section class="grid two">
+  <article class="card"><h2>Освобождаются сегодня: {{ today_domains|length }}</h2>{% with domains=today_domains %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>Освобождаются завтра: {{ tomorrow_domains|length }}</h2>{% with domains=tomorrow_domains %}{% include '_table.html' %}{% endwith %}</article>
+</section>
+<section class="grid two">
+  <article class="card"><h2>В течение 7 дней: {{ week_domains|length }}</h2>{% with domains=week_domains[:10] %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>В течение 30 дней: {{ month_domains|length }}</h2>{% with domains=month_domains[:10] %}{% include '_table.html' %}{% endwith %}</article>
+</section>
+<section class="grid two">
+  <article class="card"><h2>ТОП перспективных доменов</h2>{% with domains=top_domains %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>Избранные домены</h2>{% with domains=favorites %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>Последние добавленные</h2>{% with domains=latest %}{% include '_table.html' %}{% endwith %}</article>
+  <article class="card"><h2>Мои заметки</h2>{% with domains=notes %}{% include '_table.html' %}{% endwith %}</article>
+</section>
+{% endblock %}
